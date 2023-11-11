@@ -30,7 +30,11 @@ class PyBullet:
         renderer: str = "Tiny",
     ) -> None:
         self.render_mode = render_mode
-        background_color = background_color if background_color is not None else np.array([223.0, 54.0, 45.0])
+        background_color = (
+            background_color
+            if background_color is not None
+            else np.array([223.0, 54.0, 45.0])
+        )
         self.background_color = background_color.astype(np.float32) / 255
         options = "--background_color_red={} --background_color_green={} --background_color_blue={}".format(
             *self.background_color
@@ -43,10 +47,16 @@ class PyBullet:
             elif renderer == "Tiny":
                 self.connection_mode = p.DIRECT
             else:
-                raise ValueError("The 'renderer' argument is must be in {'Tiny', 'OpenGL'}")
+                raise ValueError(
+                    "The 'renderer' argument is must be in {'Tiny', 'OpenGL'}"
+                )
         else:
-            raise ValueError("The 'render' argument is must be in {'rgb_array', 'human'}")
-        self.physics_client = bc.BulletClient(connection_mode=self.connection_mode, options=options)
+            raise ValueError(
+                "The 'render' argument is must be in {'rgb_array', 'human'}"
+            )
+        self.physics_client = bc.BulletClient(
+            connection_mode=self.connection_mode, options=options
+        )
         self.physics_client.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
         self.physics_client.configureDebugVisualizer(p.COV_ENABLE_MOUSE_PICKING, 0)
 
@@ -107,6 +117,7 @@ class PyBullet:
         yaw: float = 45,
         pitch: float = -30,
         roll: float = 0,
+        in_task: bool = False,
     ) -> Optional[np.ndarray]:
         """Render.
 
@@ -127,30 +138,40 @@ class PyBullet:
         Returns:
             RGB np.ndarray or None: An RGB array if mode is 'rgb_array', else None.
         """
+        target_position = (
+            target_position if target_position is not None else np.zeros(3)
+        )
+        view_matrix = self.physics_client.computeViewMatrixFromYawPitchRoll(
+            cameraTargetPosition=target_position,
+            distance=distance,
+            yaw=yaw,
+            pitch=pitch,
+            roll=roll,
+            upAxisIndex=2,
+        )
+        proj_matrix = self.physics_client.computeProjectionMatrixFOV(
+            fov=60, aspect=float(width) / height, nearVal=0.1, farVal=100.0
+        )
+        (_, _, rgba, depth, _) = self.physics_client.getCameraImage(
+            width=width,
+            height=height,
+            viewMatrix=view_matrix,
+            projectionMatrix=proj_matrix,
+            shadow=True,
+            renderer=p.ER_BULLET_HARDWARE_OPENGL,
+        )
+        # With Python3.10, pybullet return flat tuple instead of array. So we need to build create the array.
+        rgba = np.array(rgba, dtype=np.uint8).reshape((height, width, 4))
+        # TODO get valid depth, reference: https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/pointCloudFromCameraImage.py
+        depth = np.array(depth, dtype=np.float32).reshape((height, width))
+
+        if in_task:
+            return rgba[..., :3], depth
+
         if self.render_mode == "rgb_array":
-            target_position = target_position if target_position is not None else np.zeros(3)
-            view_matrix = self.physics_client.computeViewMatrixFromYawPitchRoll(
-                cameraTargetPosition=target_position,
-                distance=distance,
-                yaw=yaw,
-                pitch=pitch,
-                roll=roll,
-                upAxisIndex=2,
-            )
-            proj_matrix = self.physics_client.computeProjectionMatrixFOV(
-                fov=60, aspect=float(width) / height, nearVal=0.1, farVal=100.0
-            )
-            (_, _, rgba, _, _) = self.physics_client.getCameraImage(
-                width=width,
-                height=height,
-                viewMatrix=view_matrix,
-                projectionMatrix=proj_matrix,
-                shadow=True,
-                renderer=p.ER_BULLET_HARDWARE_OPENGL,
-            )
-            # With Python3.10, pybullet return flat tuple instead of array. So we need to build create the array.
-            rgba = np.array(rgba, dtype=np.uint8).reshape((height, width, 4))
             return rgba[..., :3]
+        elif self.render_mode == "human":
+            return
 
     def get_base_position(self, body: str) -> np.ndarray:
         """Get the position of the body.
@@ -161,7 +182,9 @@ class PyBullet:
         Returns:
             np.ndarray: The position, as (x, y, z).
         """
-        position = self.physics_client.getBasePositionAndOrientation(self._bodies_idx[body])[0]
+        position = self.physics_client.getBasePositionAndOrientation(
+            self._bodies_idx[body]
+        )[0]
         return np.array(position)
 
     def get_base_orientation(self, body: str) -> np.ndarray:
@@ -173,7 +196,9 @@ class PyBullet:
         Returns:
             np.ndarray: The orientation, as quaternion (x, y, z, w).
         """
-        orientation = self.physics_client.getBasePositionAndOrientation(self._bodies_idx[body])[1]
+        orientation = self.physics_client.getBasePositionAndOrientation(
+            self._bodies_idx[body]
+        )[1]
         return np.array(orientation)
 
     def get_base_rotation(self, body: str, type: str = "euler") -> np.ndarray:
@@ -216,7 +241,9 @@ class PyBullet:
         Returns:
             np.ndarray: The angular velocity, as (wx, wy, wz).
         """
-        angular_velocity = self.physics_client.getBaseVelocity(self._bodies_idx[body])[1]
+        angular_velocity = self.physics_client.getBaseVelocity(self._bodies_idx[body])[
+            1
+        ]
         return np.array(angular_velocity)
 
     def get_link_position(self, body: str, link: int) -> np.ndarray:
@@ -255,7 +282,9 @@ class PyBullet:
         Returns:
             np.ndarray: The velocity, as (vx, vy, vz).
         """
-        velocity = self.physics_client.getLinkState(self._bodies_idx[body], link, computeLinkVelocity=True)[6]
+        velocity = self.physics_client.getLinkState(
+            self._bodies_idx[body], link, computeLinkVelocity=True
+        )[6]
         return np.array(velocity)
 
     def get_link_angular_velocity(self, body: str, link: int) -> np.ndarray:
@@ -268,7 +297,9 @@ class PyBullet:
         Returns:
             np.ndarray: The angular velocity, as (wx, wy, wz).
         """
-        angular_velocity = self.physics_client.getLinkState(self._bodies_idx[body], link, computeLinkVelocity=True)[7]
+        angular_velocity = self.physics_client.getLinkState(
+            self._bodies_idx[body], link, computeLinkVelocity=True
+        )[7]
         return np.array(angular_velocity)
 
     def get_joint_angle(self, body: str, joint: int) -> float:
@@ -295,7 +326,9 @@ class PyBullet:
         """
         return self.physics_client.getJointState(self._bodies_idx[body], joint)[1]
 
-    def set_base_pose(self, body: str, position: np.ndarray, orientation: np.ndarray) -> None:
+    def set_base_pose(
+        self, body: str, position: np.ndarray, orientation: np.ndarray
+    ) -> None:
         """Set the position of the body.
 
         Args:
@@ -309,7 +342,9 @@ class PyBullet:
             bodyUniqueId=self._bodies_idx[body], posObj=position, ornObj=orientation
         )
 
-    def set_joint_angles(self, body: str, joints: np.ndarray, angles: np.ndarray) -> None:
+    def set_joint_angles(
+        self, body: str, joints: np.ndarray, angles: np.ndarray
+    ) -> None:
         """Set the angles of the joints of the body.
 
         Args:
@@ -328,9 +363,17 @@ class PyBullet:
             joint (int): Joint index in the body.
             angle (float): Target angle.
         """
-        self.physics_client.resetJointState(bodyUniqueId=self._bodies_idx[body], jointIndex=joint, targetValue=angle)
+        self.physics_client.resetJointState(
+            bodyUniqueId=self._bodies_idx[body], jointIndex=joint, targetValue=angle
+        )
 
-    def control_joints(self, body: str, joints: np.ndarray, target_angles: np.ndarray, forces: np.ndarray) -> None:
+    def control_joints(
+        self,
+        body: str,
+        joints: np.ndarray,
+        target_angles: np.ndarray,
+        forces: np.ndarray,
+    ) -> None:
         """Control the joints motor.
 
         Args:
@@ -347,7 +390,9 @@ class PyBullet:
             forces=forces,
         )
 
-    def inverse_kinematics(self, body: str, link: int, position: np.ndarray, orientation: np.ndarray) -> np.ndarray:
+    def inverse_kinematics(
+        self, body: str, link: int, position: np.ndarray, orientation: np.ndarray
+    ) -> np.ndarray:
         """Compute the inverse kinematics and return the new joint state.
 
         Args:
@@ -367,7 +412,9 @@ class PyBullet:
         )
         return np.array(joint_state)
 
-    def place_visualizer(self, target_position: np.ndarray, distance: float, yaw: float, pitch: float) -> None:
+    def place_visualizer(
+        self, target_position: np.ndarray, distance: float, yaw: float, pitch: float
+    ) -> None:
         """Orient the camera used for rendering.
 
         Args:
@@ -386,9 +433,13 @@ class PyBullet:
     @contextmanager
     def no_rendering(self) -> Iterator[None]:
         """Disable rendering within this context."""
-        self.physics_client.configureDebugVisualizer(self.physics_client.COV_ENABLE_RENDERING, 0)
+        self.physics_client.configureDebugVisualizer(
+            self.physics_client.COV_ENABLE_RENDERING, 0
+        )
         yield
-        self.physics_client.configureDebugVisualizer(self.physics_client.COV_ENABLE_RENDERING, 1)
+        self.physics_client.configureDebugVisualizer(
+            self.physics_client.COV_ENABLE_RENDERING, 1
+        )
 
     def loadURDF(self, body_name: str, **kwargs: Any) -> None:
         """Load URDF file.
@@ -449,7 +500,9 @@ class PyBullet:
         if texture is not None:
             texture_path = os.path.join(panda_gym.assets.get_data_path(), texture)
             texture_uid = self.physics_client.loadTexture(texture_path)
-            self.physics_client.changeVisualShape(self._bodies_idx[body_name], -1, textureUniqueId=texture_uid)
+            self.physics_client.changeVisualShape(
+                self._bodies_idx[body_name], -1, textureUniqueId=texture_uid
+            )
 
     def create_cylinder(
         self,
@@ -576,9 +629,13 @@ class PyBullet:
             collision_kwargs (dict, optional): Collision kwargs. Defaults to {}.
         """
         position = position if position is not None else np.zeros(3)
-        baseVisualShapeIndex = self.physics_client.createVisualShape(geom_type, **visual_kwargs)
+        baseVisualShapeIndex = self.physics_client.createVisualShape(
+            geom_type, **visual_kwargs
+        )
         if not ghost:
-            baseCollisionShapeIndex = self.physics_client.createCollisionShape(geom_type, **collision_kwargs)
+            baseCollisionShapeIndex = self.physics_client.createCollisionShape(
+                geom_type, **collision_kwargs
+            )
         else:
             baseCollisionShapeIndex = -1
         self._bodies_idx[body_name] = self.physics_client.createMultiBody(
@@ -589,9 +646,13 @@ class PyBullet:
         )
 
         if lateral_friction is not None:
-            self.set_lateral_friction(body=body_name, link=-1, lateral_friction=lateral_friction)
+            self.set_lateral_friction(
+                body=body_name, link=-1, lateral_friction=lateral_friction
+            )
         if spinning_friction is not None:
-            self.set_spinning_friction(body=body_name, link=-1, spinning_friction=spinning_friction)
+            self.set_spinning_friction(
+                body=body_name, link=-1, spinning_friction=spinning_friction
+            )
 
     def create_plane(self, z_offset: float) -> None:
         """Create a plane. (Actually, it is a thin box.)
@@ -640,7 +701,9 @@ class PyBullet:
             spinning_friction=spinning_friction,
         )
 
-    def set_lateral_friction(self, body: str, link: int, lateral_friction: float) -> None:
+    def set_lateral_friction(
+        self, body: str, link: int, lateral_friction: float
+    ) -> None:
         """Set the lateral friction of a link.
 
         Args:
@@ -654,7 +717,9 @@ class PyBullet:
             lateralFriction=lateral_friction,
         )
 
-    def set_spinning_friction(self, body: str, link: int, spinning_friction: float) -> None:
+    def set_spinning_friction(
+        self, body: str, link: int, spinning_friction: float
+    ) -> None:
         """Set the spinning friction of a link.
 
         Args:

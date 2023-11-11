@@ -139,9 +139,13 @@ class PyBulletRobot(ABC):
         Args:
             angles (list): Joint angles.
         """
-        self.sim.set_joint_angles(self.body_name, joints=self.joint_indices, angles=angles)
+        self.sim.set_joint_angles(
+            self.body_name, joints=self.joint_indices, angles=angles
+        )
 
-    def inverse_kinematics(self, link: int, position: np.ndarray, orientation: np.ndarray) -> np.ndarray:
+    def inverse_kinematics(
+        self, link: int, position: np.ndarray, orientation: np.ndarray
+    ) -> np.ndarray:
         """Compute the inverse kinematics and return the new joint values.
 
         Args:
@@ -152,7 +156,9 @@ class PyBulletRobot(ABC):
         Returns:
             List of joint values.
         """
-        inverse_kinematics = self.sim.inverse_kinematics(self.body_name, link=link, position=position, orientation=orientation)
+        inverse_kinematics = self.sim.inverse_kinematics(
+            self.body_name, link=link, position=position, orientation=orientation
+        )
         return inverse_kinematics
 
 
@@ -162,9 +168,60 @@ class Task(ABC):
         sim (PyBullet): Simulation instance.
     """
 
-    def __init__(self, sim: PyBullet) -> None:
+    def __init__(
+        self,
+        sim: PyBullet,
+        render_width: int = 720,
+        render_height: int = 480,
+        render_target_position: Optional[np.ndarray] = None,
+        render_distance: float = 0.7,
+        render_yaw: float = 90,
+        render_pitch: float = -30,
+        render_roll: float = 0,
+    ):
         self.sim = sim
         self.goal = None
+        self.render_width = render_width
+        self.render_height = render_height
+        self.render_target_position = render_target_position
+        self.render_distance = render_distance
+        self.render_yaw = render_yaw
+        self.render_pitch = render_pitch
+        self.render_roll = render_roll
+        self.render_in_task = True
+
+    def set_render_view(
+        self,
+        render_width,
+        render_height,
+        render_target_position,
+        render_distance,
+        render_yaw,
+        render_pitch,
+        render_roll,
+    ) -> None:
+        self.render_width = render_width
+        self.render_height = render_height
+        self.render_target_position = render_target_position
+        self.render_distance = render_distance
+        self.render_yaw = render_yaw
+        self.render_pitch = render_pitch
+        self.render_roll = render_roll
+
+    def get_render_views(
+        self,
+    ):
+        """Return RGB and depth image"""
+        return self.sim.render(
+            width=self.render_width,
+            height=self.render_height,
+            target_position=self.render_target_position,
+            distance=self.render_distance,
+            yaw=self.render_yaw,
+            pitch=self.render_pitch,
+            roll=self.render_roll,
+            in_task=self.render_in_task,
+        )
 
     @abstractmethod
     def reset(self) -> None:
@@ -186,11 +243,21 @@ class Task(ABC):
             return self.goal.copy()
 
     @abstractmethod
-    def is_success(self, achieved_goal: np.ndarray, desired_goal: np.ndarray, info: Dict[str, Any] = {}) -> np.ndarray:
+    def is_success(
+        self,
+        achieved_goal: np.ndarray,
+        desired_goal: np.ndarray,
+        info: Dict[str, Any] = {},
+    ) -> np.ndarray:
         """Returns whether the achieved goal match the desired goal."""
 
     @abstractmethod
-    def compute_reward(self, achieved_goal: np.ndarray, desired_goal: np.ndarray, info: Dict[str, Any] = {}) -> np.ndarray:
+    def compute_reward(
+        self,
+        achieved_goal: np.ndarray,
+        desired_goal: np.ndarray,
+        info: Dict[str, Any] = {},
+    ) -> np.ndarray:
         """Compute reward associated to the achieved and the desired goal."""
 
 
@@ -224,21 +291,36 @@ class RobotTaskEnv(gym.Env):
         render_pitch: float = -30,
         render_roll: float = 0,
     ) -> None:
-        assert robot.sim == task.sim, "The robot and the task must belong to the same simulation."
+        assert (
+            robot.sim == task.sim
+        ), "The robot and the task must belong to the same simulation."
         self.sim = robot.sim
         self.render_mode = self.sim.render_mode
         self.metadata["render_fps"] = 1 / self.sim.dt
         self.robot = robot
         self.task = task
+
+        # trigger vision reasoning in training
         observation, _ = self.reset()  # required for init; seed can be changed later
         observation_shape = observation["observation"].shape
         achieved_goal_shape = observation["achieved_goal"].shape
         desired_goal_shape = observation["desired_goal"].shape
+        rgb_img_shape = observation["rgb"].shape
+        depth_img_shape = observation["depth"].shape
+
         self.observation_space = spaces.Dict(
             dict(
-                observation=spaces.Box(-10.0, 10.0, shape=observation_shape, dtype=np.float32),
-                desired_goal=spaces.Box(-10.0, 10.0, shape=desired_goal_shape, dtype=np.float32),
-                achieved_goal=spaces.Box(-10.0, 10.0, shape=achieved_goal_shape, dtype=np.float32),
+                observation=spaces.Box(
+                    -10.0, 10.0, shape=observation_shape, dtype=np.float32
+                ),
+                desired_goal=spaces.Box(
+                    -10.0, 10.0, shape=desired_goal_shape, dtype=np.float32
+                ),
+                achieved_goal=spaces.Box(
+                    -10.0, 10.0, shape=achieved_goal_shape, dtype=np.float32
+                ),
+                rgb=spaces.Box(0, 255, shape=rgb_img_shape, dtype=np.uint8),
+                depth=spaces.Box(0, 1.0, shape=depth_img_shape, dtype=np.float32),
             )
         )
         self.action_space = self.robot.action_space
@@ -248,7 +330,9 @@ class RobotTaskEnv(gym.Env):
         self.render_width = render_width
         self.render_height = render_height
         self.render_target_position = (
-            render_target_position if render_target_position is not None else np.array([0.0, 0.0, 0.0])
+            render_target_position
+            if render_target_position is not None
+            else np.array([0.0, 0.0, 0.0])
         )
         self.render_distance = render_distance
         self.render_yaw = render_yaw
@@ -264,13 +348,31 @@ class RobotTaskEnv(gym.Env):
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
         robot_obs = self.robot.get_obs().astype(np.float32)  # robot state
-        task_obs = self.task.get_obs().astype(np.float32)  # object position, velococity, etc...
+        task_obs = self.task.get_obs()
+        if isinstance(task_obs, np.ndarray):
+            task_obs = task_obs.astype(
+                np.float32
+            )  # object position, velococity, etc...
+            rgb, depth = None
+        else:
+            assert isinstance(
+                task_obs, dict
+            ), "ValueError: task_obs must be a dict() or ndnumpy array"
+            rgb = task_obs["rgb"]
+            depth = task_obs["depth"]
+            task_obs = task_obs["observation"].astype(
+                np.float32
+            )  # object position, velococity, etc...
+
         observation = np.concatenate([robot_obs, task_obs])
         achieved_goal = self.task.get_achieved_goal().astype(np.float32)
+
         return {
             "observation": observation,
             "achieved_goal": achieved_goal,
             "desired_goal": self.task.get_goal().astype(np.float32),
+            "rgb": rgb,
+            "depth": depth,
         }
 
     def reset(
@@ -282,7 +384,11 @@ class RobotTaskEnv(gym.Env):
             self.robot.reset()
             self.task.reset()
         observation = self._get_obs()
-        info = {"is_success": self.task.is_success(observation["achieved_goal"], self.task.get_goal())}
+        info = {
+            "is_success": self.task.is_success(
+                observation["achieved_goal"], self.task.get_goal()
+            )
+        }
         return observation, info
 
     def save_state(self) -> int:
@@ -313,15 +419,23 @@ class RobotTaskEnv(gym.Env):
         self._saved_goal.pop(state_id)
         self.sim.remove_state(state_id)
 
-    def step(self, action: np.ndarray) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
+    def step(
+        self, action: np.ndarray
+    ) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict[str, Any]]:
         self.robot.set_action(action)
         self.sim.step()
         observation = self._get_obs()
         # An episode is terminated iff the agent has reached the target
-        terminated = bool(self.task.is_success(observation["achieved_goal"], self.task.get_goal()))
+        terminated = bool(
+            self.task.is_success(observation["achieved_goal"], self.task.get_goal())
+        )
         truncated = False
         info = {"is_success": terminated}
-        reward = float(self.task.compute_reward(observation["achieved_goal"], self.task.get_goal(), info))
+        reward = float(
+            self.task.compute_reward(
+                observation["achieved_goal"], self.task.get_goal(), info
+            )
+        )
         return observation, reward, terminated, truncated, info
 
     def close(self) -> None:

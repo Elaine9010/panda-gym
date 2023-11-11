@@ -15,7 +15,8 @@ class Push(Task):
         goal_xy_range=0.3,
         obj_xy_range=0.3,
     ) -> None:
-        super().__init__(sim)
+        super().__init__(sim=sim)
+
         self.reward_type = reward_type
         self.distance_threshold = distance_threshold
         self.object_size = 0.04
@@ -59,7 +60,12 @@ class Push(Task):
                 object_angular_velocity,
             ]
         )
-        return observation
+        # TODO test rgb and depth receviced successully
+        if True:
+            rgb, depth = self.get_render_views()
+            return {"observation": observation, "rgb": rgb, "depth": depth}
+        else:
+            return observation
 
     def get_achieved_goal(self) -> np.ndarray:
         object_position = np.array(self.sim.get_base_position("object"))
@@ -69,11 +75,15 @@ class Push(Task):
         self.goal = self._sample_goal()
         object_position = self._sample_object()
         self.sim.set_base_pose("target", self.goal, np.array([0.0, 0.0, 0.0, 1.0]))
-        self.sim.set_base_pose("object", object_position, np.array([0.0, 0.0, 0.0, 1.0]))
+        self.sim.set_base_pose(
+            "object", object_position, np.array([0.0, 0.0, 0.0, 1.0])
+        )
 
     def _sample_goal(self) -> np.ndarray:
         """Randomize goal."""
-        goal = np.array([0.0, 0.0, self.object_size / 2])  # z offset for the cube center
+        goal = np.array(
+            [0.0, 0.0, self.object_size / 2]
+        )  # z offset for the cube center
         noise = self.np_random.uniform(self.goal_range_low, self.goal_range_high)
         goal += noise
         return goal
@@ -85,11 +95,15 @@ class Push(Task):
         object_position += noise
         return object_position
 
-    def is_success(self, achieved_goal: np.ndarray, desired_goal: np.ndarray) -> np.ndarray:
+    def is_success(
+        self, achieved_goal: np.ndarray, desired_goal: np.ndarray
+    ) -> np.ndarray:
         d = distance(achieved_goal, desired_goal)
         return np.array(d < self.distance_threshold, dtype=bool)
 
-    def compute_reward(self, achieved_goal, desired_goal, info: Dict[str, Any]) -> np.ndarray:
+    def compute_reward(
+        self, achieved_goal, desired_goal, info: Dict[str, Any]
+    ) -> np.ndarray:
         d = distance(achieved_goal, desired_goal)
         if self.reward_type == "sparse":
             return -np.array(d > self.distance_threshold, dtype=np.float32)
